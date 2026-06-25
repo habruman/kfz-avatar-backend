@@ -16,19 +16,30 @@ app.use(express.json());
 const upload = multer({
   dest: "uploads/",
   limits: {
-    fileSize: 10 * 1024 * 1024
+    fileSize: 10 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith("image/")) {
       return cb(new Error("Nur Bilddateien sind erlaubt."));
     }
     cb(null, true);
-  }
+  },
 });
 
 const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_TOKEN
+  auth: process.env.REPLICATE_API_TOKEN,
 });
+
+/* =====================================================
+   FESTE EINSTELLUNGEN
+   Diese Werte werden NICHT mehr vom Frontend ausgewählt.
+===================================================== */
+
+const FIXED_STYLE = "cartoon";
+const FIXED_VIEW_TYPE = "fullbody";
+const FIXED_PEOPLE_MODE = "allPeople";
+const FIXED_LIKENESS = "veryHigh";
+const FIXED_ASPECT_RATIO = "4:5";
 
 /* =====================================================
    1. Sichere Verarbeitung der Frontend-Parameter
@@ -103,7 +114,7 @@ function normalizeAccessories(input) {
 
     headphones: "headphones",
     kopfhoerer: "headphones",
-    kopfhörer: "headphones"
+    kopfhörer: "headphones",
   };
 
   const allowed = ["glasses", "crown", "flowers", "headphones"];
@@ -111,78 +122,33 @@ function normalizeAccessories(input) {
   return [
     ...new Set(
       values
-        .map(item => cleanText(item, "", 80))
-        .map(item => aliases[item] || item)
-        .filter(item => allowed.includes(item))
-    )
+        .map((item) => cleanText(item, "", 80))
+        .map((item) => aliases[item] || item)
+        .filter((item) => allowed.includes(item))
+    ),
   ];
 }
 
 /* =====================================================
-   2. Texte für Prompt-Teile
+   2. Prompt-Teile
 ===================================================== */
-
-function getAspectRatio(format, viewType, peopleMode) {
-  // Bei mehreren Personen besser 4:5, damit niemand abgeschnitten wird.
-  if (peopleMode === "allPeople") return "4:5";
-
-  if (format === "instagram") return "4:5";
-  if (viewType === "fullbody") return "4:5";
-  if (format === "sticker") return "1:1";
-
-  return "1:1";
-}
-
-function getStyleText(style) {
-  const styles = {
-    avatar:
-      "STYLE REQUIREMENT: Create a polished modern semi-realistic 3D avatar. Keep the real facial identity visible. Do not make the face generic or doll-like.",
-
-    cartoon:
-      "STYLE REQUIREMENT: Create a polished cartoon avatar. Keep the real facial structure and identity visible. Do not simplify the face too much.",
-
-    anime:
-      "STYLE REQUIREMENT: Create an anime-inspired avatar, but preserve the real face. Avoid generic anime eyes, generic anime nose, or a completely new anime character.",
-
-    sticker:
-      "STYLE REQUIREMENT: Create a clean sticker-style avatar with clear outlines. Keep the real face recognizable and do not hide facial details."
-  };
-
-  return styles[style] || styles.avatar;
-}
-
-function getViewText(viewType, peopleMode) {
-  if (viewType === "fullbody") {
-    if (peopleMode === "allPeople") {
-      return "VIEW REQUIREMENT: Show all visible people as full-body figures from head to toe. Do not crop heads, faces, feet, or bodies.";
-    }
-
-    return "VIEW REQUIREMENT: Show the main person as a full-body figure from head to toe. Do not crop the head, face, feet, or body.";
-  }
-
-  if (peopleMode === "allPeople") {
-    return "VIEW REQUIREMENT: Create a clear group portrait. Show all visible faces clearly as head-and-shoulders or upper-body portrait.";
-  }
-
-  return "VIEW REQUIREMENT: Create a clear head-and-shoulders portrait of the main person. Keep the face large, centered, and readable.";
-}
 
 function getBackgroundText(background) {
   const backgrounds = {
     clean:
-      "BACKGROUND REQUIREMENT: Use a simple clean light background. The background must not distract from the person.",
+      "BACKGROUND REQUIREMENT: Use a simple clean light background. The background must not distract from the person or people.",
 
     studio:
       "BACKGROUND REQUIREMENT: Use a professional studio background with soft lighting. The background must look clean and premium.",
 
     city:
-      "BACKGROUND REQUIREMENT: Use a modern city background, slightly blurred. Keep the person as the clear focus.",
+      "BACKGROUND REQUIREMENT: Use a modern city background, slightly blurred. Keep the person or people as the clear focus.",
 
     restaurant:
       "BACKGROUND REQUIREMENT: Use a cozy restaurant or café background, warm and slightly blurred. Do not make the background too busy.",
 
     fantasy:
-      "BACKGROUND REQUIREMENT: Use a tasteful fantasy-style background with soft magical lighting. Keep it elegant, not childish."
+      "BACKGROUND REQUIREMENT: Use a tasteful fantasy-style background with soft magical lighting. Keep it elegant, not childish.",
   };
 
   return backgrounds[background] || backgrounds.clean;
@@ -191,48 +157,22 @@ function getBackgroundText(background) {
 function getMoodText(mood) {
   const moods = {
     friendly:
-      "MOOD REQUIREMENT: The avatar should look friendly, warm, natural, and approachable.",
+      "MOOD REQUIREMENT: The avatar should look friendly, warm, natural, positive, and approachable.",
 
     professional:
       "MOOD REQUIREMENT: The avatar should look professional, confident, polished, and trustworthy.",
 
     funny:
-      "MOOD REQUIREMENT: The avatar should look cheerful and slightly playful, but not exaggerated or silly."
+      "MOOD REQUIREMENT: The avatar should look cheerful and slightly playful, but not exaggerated, silly, or distorted.",
   };
 
   return moods[mood] || moods.friendly;
 }
 
-function getFormatText(format, peopleMode) {
-  if (format === "instagram") {
-    return "FORMAT REQUIREMENT: Compose the image like a high-quality Instagram post. Leave enough space around the person or people. Do not crop important parts.";
-  }
-
-  if (format === "sticker") {
-    if (peopleMode === "allPeople") {
-      return "FORMAT REQUIREMENT: Compose the image like a clean group sticker. All people must remain visible inside the sticker composition.";
-    }
-
-    return "FORMAT REQUIREMENT: Compose the image like a clean sticker. The person must remain fully visible inside the sticker composition.";
-  }
-
-  if (peopleMode === "allPeople") {
-    return "FORMAT REQUIREMENT: Compose the image like a clean profile/group picture. All visible faces should remain visible and recognizable.";
-  }
-
-  return "FORMAT REQUIREMENT: Compose the image like a clean profile picture. The face should be clear, centered, and recognizable.";
-}
-
-function getOutfitText(outfit, customOutfit) {
-  const custom = cleanText(customOutfit, "", 300);
-
-  if (custom) {
-    return `OUTFIT REQUIREMENT: Change or adapt the outfit to: "${custom}". This outfit instruction is important, but it must not change the face, age, skin tone, body identity, or facial likeness.`;
-  }
-
+function getOutfitText(outfit) {
   const outfits = {
     keep:
-      "OUTFIT REQUIREMENT: Keep the original clothing style as much as possible.",
+      "OUTFIT REQUIREMENT: Keep the original clothing style as much as possible. Do not invent a completely different outfit unless necessary for full-body completion.",
 
     casual:
       "OUTFIT REQUIREMENT: Use a casual outfit. The outfit should look natural and fit the person.",
@@ -247,7 +187,7 @@ function getOutfitText(outfit, customOutfit) {
       "OUTFIT REQUIREMENT: Use a tasteful traditional outfit. Do not make it costume-like or exaggerated.",
 
     creative:
-      "OUTFIT REQUIREMENT: Use a creative trendy outfit. Keep it stylish but not distracting."
+      "OUTFIT REQUIREMENT: Use a creative trendy outfit. Keep it stylish but not distracting.",
   };
 
   return outfits[outfit] || outfits.keep;
@@ -262,69 +202,61 @@ function getAccessoriesText(accessories) {
     glasses: "stylish glasses",
     crown: "a small elegant crown",
     flowers: "subtle decorative flowers",
-    headphones: "modern headphones"
+    headphones: "modern headphones",
   };
 
-  const accessoryNames = accessories.map(item => map[item] || item);
+  const accessoryNames = accessories.map((item) => map[item] || item);
 
   return `
 ACCESSORY REQUIREMENT:
 Add these selected accessories: ${accessoryNames.join(", ")}.
 The accessories should be visible but natural.
 Do not cover the eyes, eyebrows, nose, mouth, face shape, hairstyle, or important identity features.
+If an accessory makes identity less recognizable, reduce it or make it subtle.
 `;
 }
 
-function getPeopleText(peopleMode) {
-  if (peopleMode === "mainPerson") {
-    return `
-PEOPLE REQUIREMENT:
-Transform only the main person in the image.
-The main person is the largest, most central, or clearest face.
-Ignore background people.
-Do not create extra people.
-`;
-  }
-
+function getPeopleText() {
   return `
-PEOPLE REQUIREMENT:
-If the uploaded image contains multiple clearly visible people, transform ALL clearly visible people.
-Keep the same number of clearly visible people as in the uploaded image.
-Do not remove a person.
-Do not ignore a person.
-Do not merge people.
+PEOPLE REQUIREMENT - VERY IMPORTANT:
+Count the number of clearly visible people in the uploaded image.
+
+The output MUST contain exactly the same number of clearly visible people.
+If the uploaded image contains multiple people, every visible person must appear in the final image.
+
+Do not remove any person.
+Do not ignore any person.
+Do not merge two people into one.
 Do not create only one avatar when multiple people are visible.
-Preserve left-to-right order, relative positions, poses, and body sizes.
-Each person must keep their own facial identity, hairstyle, skin tone, age impression, expression, and clothing impression.
+Do not add extra people.
+
+Preserve:
+- left-to-right order
+- relative positions
+- relative body sizes
+- pose direction
+- distance between people
+- individual facial identity
+- individual hairstyle
+- individual skin tone
+- individual age impression
+- individual expression
+- individual clothing impression
+
+All people must be transformed into the SAME cartoon style.
+Do not make one person realistic and another person cartoon.
+Do not use mixed illustration styles.
 `;
 }
 
-function getLikenessText(likeness) {
-  if (likeness === "medium") {
-    return `
-IDENTITY REQUIREMENT:
-Keep the person generally recognizable, but allow stronger stylization.
-Do not create a completely different face.
-Do not replace the person with a generic avatar.
-`;
-  }
-
-  if (likeness === "high") {
-    return `
-IDENTITY REQUIREMENT:
-Keep the person clearly recognizable.
-Preserve face shape, eyes, eyebrows, nose, mouth, skin tone, hairstyle, facial hair, age impression, and expression.
-Stylize the image, but do not change the main facial features.
-`;
-  }
-
+function getIdentityText() {
   return `
 IDENTITY REQUIREMENT - VERY HIGH:
 This is an image-to-image transformation, not a new character creation.
 
 The result must still look like the uploaded person or uploaded people.
 
-Preserve:
+Preserve for every visible person:
 - face shape and jawline
 - cheeks and forehead
 - eye shape, eye spacing, eyelids, and gaze
@@ -332,7 +264,7 @@ Preserve:
 - nose shape
 - lips and smile
 - skin tone
-- hairstyle, hairline, hair color
+- hairstyle, hairline, and hair color
 - beard or mustache
 - glasses or unique visible features
 - age impression
@@ -345,88 +277,139 @@ Do not change ethnicity, gender expression, skin tone, hairstyle, beard, eyes, n
 `;
 }
 
+function getStyleText() {
+  return `
+STYLE REQUIREMENT:
+Create a polished modern cartoon avatar illustration.
+
+Use one consistent cartoon style for the entire image.
+The result should look friendly, clean, colorful, and suitable for a public diversity wall.
+
+Important:
+- cartoon style, not anime
+- cartoon style, not sticker-only
+- cartoon style, not realistic 3D
+- cartoon style, not Disney, Pixar, Bitmoji, Snapchat, or any specific brand style
+- keep enough facial detail so every person remains recognizable
+`;
+}
+
+function getViewText() {
+  return `
+VIEW REQUIREMENT - FULL BODY:
+Show every visible person as a full-body figure from head to toe.
+
+Do not crop:
+- head
+- face
+- hair
+- hands
+- legs
+- feet
+- body
+
+If the original photo shows only head, shoulders, or upper body, extend the missing lower body naturally.
+The generated full body should match the person's appearance, pose, clothing style, body proportions, and perspective as much as possible.
+
+Keep the face clearly visible and recognizable.
+Do not make the face too small.
+Leave enough space around all people so nobody is cut off.
+`;
+}
+
 /* =====================================================
    3. Prompt bauen
 ===================================================== */
 
 function buildPrompt({
-  style,
-  viewType,
   background,
   mood,
-  format,
   outfit,
-  customOutfit,
   accessories,
-  likeness,
-  peopleMode,
-  extraPrompt
+  extraPrompt,
 }) {
-  const safeExtraPrompt = cleanText(extraPrompt, "", 600);
+  const safeExtraPrompt = cleanText(extraPrompt, "", 700);
 
   const lockedSettings = `
-LOCKED USER SETTINGS:
-- style: ${style}
-- view type: ${viewType}
+LOCKED SETTINGS:
+- style: ${FIXED_STYLE}
+- view type: ${FIXED_VIEW_TYPE}
+- people mode: ${FIXED_PEOPLE_MODE}
+- identity preservation: ${FIXED_LIKENESS}
 - background: ${background}
 - mood: ${mood}
-- format: ${format}
-- outfit: ${customOutfit ? customOutfit : outfit}
+- outfit: ${outfit}
 - accessories: ${accessories.length > 0 ? accessories.join(", ") : "none"}
-- identity preservation: ${likeness}
-- people mode: ${peopleMode}
 
-These locked settings are mandatory.
-Do not ignore the selected style, background, outfit, mood, format, accessories, or people mode.
-If there is a conflict, identity preservation is the highest priority.
+These settings are mandatory.
+If there is a conflict, identity preservation and keeping all people are the highest priorities.
 `;
 
   return `
 TASK:
-Transform the uploaded photo into an avatar illustration.
+Transform the uploaded photo into a full-body cartoon avatar illustration.
 
 ${lockedSettings}
 
 PRIORITY ORDER:
-1. Preserve identity and facial likeness.
-2. Follow the people requirement.
-3. Follow the selected user settings.
-4. Apply the requested avatar style.
-5. Make the final image clean and high quality.
+1. Keep every visible person in the output.
+2. Preserve identity and facial likeness of every person.
+3. Create full-body figures from head to toe.
+4. Use one consistent cartoon style for everyone.
+5. Apply selected background, mood, outfit, and accessories.
+6. Make the final image clean, polished, printable, and high quality.
 
-${getPeopleText(peopleMode)}
+${getPeopleText()}
 
-${getLikenessText(likeness)}
+${getIdentityText()}
 
-${getStyleText(style)}
+${getStyleText()}
 
-${getViewText(viewType, peopleMode)}
-
-${getFormatText(format, peopleMode)}
+${getViewText()}
 
 ${getBackgroundText(background)}
 
 ${getMoodText(mood)}
 
-${getOutfitText(outfit, customOutfit)}
+${getOutfitText(outfit)}
 
 ${getAccessoriesText(accessories)}
 
 QUALITY RULES:
-The final result should be clean, polished, high-quality, and visually appealing.
-Avoid text, logos, watermarks, distorted hands, extra fingers, duplicated faces, missing faces, cropped faces, and changed identities.
-Do not copy Snapchat, Bitmoji, Disney, Pixar, or any specific brand style.
+The final image should be clean, polished, high-quality, colorful, positive, and visually appealing.
+It should be suitable for printing and displaying on a public diversity wall.
+
+Avoid:
+- text
+- logos
+- watermarks
+- distorted hands
+- extra fingers
+- missing fingers
+- duplicated faces
+- missing faces
+- cropped faces
+- cropped feet
+- changed identities
+- mixed styles
+- extra people
+- removed people
+- blurry faces
+- over-smoothed faces
 
 FINAL CHECKLIST BEFORE OUTPUT:
-- Is the person still recognizable?
-- Are all selected settings applied?
-- Is the correct number of people shown?
+- Are all visible people from the original image still present?
+- Is the number of people correct?
+- Is every person full-body from head to toe?
+- Is every face recognizable?
+- Is everyone in the same cartoon style?
 - Is the selected background used?
-- Is the selected outfit used?
+- Is the selected mood used?
+- Is the selected outfit direction used?
 - Are selected accessories included naturally?
-- Is the image in the selected style?
+- Is the final image clean and printable?
 
-${safeExtraPrompt ? `ADDITIONAL USER REQUEST: ${safeExtraPrompt}. Apply this only if it does not conflict with identity or people count.` : ""}
+${safeExtraPrompt ? `ADDITIONAL USER REQUEST: ${safeExtraPrompt}. Apply this only if it does not conflict with identity, full-body view, or people count.` : ""}
 `;
 }
 
@@ -497,7 +480,14 @@ async function normalizeOutput(output) {
 
 app.get("/", (req, res) => {
   res.json({
-    message: "Avatar server läuft."
+    message: "Avatar server läuft.",
+    fixedSettings: {
+      style: FIXED_STYLE,
+      viewType: FIXED_VIEW_TYPE,
+      peopleMode: FIXED_PEOPLE_MODE,
+      likeness: FIXED_LIKENESS,
+      aspectRatio: FIXED_ASPECT_RATIO,
+    },
   });
 });
 
@@ -507,38 +497,36 @@ app.post("/api/avatar", upload.single("image"), async (req, res) => {
   try {
     if (!process.env.REPLICATE_API_TOKEN) {
       return res.status(500).json({
-        error: "REPLICATE_API_TOKEN fehlt in der .env Datei."
+        error: "REPLICATE_API_TOKEN fehlt in der .env Datei.",
       });
     }
 
     if (!req.file) {
       return res.status(400).json({
-        error: "Kein Bild hochgeladen."
+        error: "Kein Bild hochgeladen.",
       });
     }
 
     uploadedFilePath = req.file.path;
 
-    const style = normalizeOption(
-      req.body.style,
-      "avatar",
-      ["avatar", "cartoon", "anime", "sticker"],
-      {
-        "3d": "avatar",
-        "modern3d": "avatar",
-        "modern-3d": "avatar"
-      }
-    );
+    /*
+      Diese Werte bleiben vom Frontend steuerbar:
+      - background
+      - mood
+      - outfit
+      - accessories
+      - extraPrompt
 
-    const viewType = normalizeOption(
-      req.body.viewType,
-      "portrait",
-      ["portrait", "fullbody"],
-      {
-        "full-body": "fullbody",
-        "full_body": "fullbody"
-      }
-    );
+      Diese Werte sind fest:
+      - style = cartoon
+      - viewType = fullbody
+      - peopleMode = allPeople
+      - likeness = veryHigh
+
+      Gelöscht:
+      - format
+      - customOutfit
+    */
 
     const background = normalizeOption(
       req.body.background,
@@ -552,89 +540,43 @@ app.post("/api/avatar", upload.single("image"), async (req, res) => {
       ["friendly", "professional", "funny"]
     );
 
-    const format = normalizeOption(
-      req.body.format,
-      "profile",
-      ["profile", "instagram", "sticker"],
-      {
-        "profile-picture": "profile",
-        "profile_picture": "profile"
-      }
-    );
-
     const outfit = normalizeOption(
       req.body.outfit,
       "keep",
       ["keep", "casual", "formal", "sporty", "traditional", "creative"]
     );
 
-    const likeness = normalizeOption(
-      req.body.likeness,
-      "veryHigh",
-      ["medium", "high", "veryHigh"],
-      {
-        "very-high": "veryHigh",
-        "very_high": "veryHigh",
-        "veryhigh": "veryHigh"
-      }
-    );
-
-    const peopleMode = normalizeOption(
-      req.body.peopleMode,
-      "allPeople",
-      ["allPeople", "mainPerson"],
-      {
-        "all": "allPeople",
-        "all_people": "allPeople",
-        "all-people": "allPeople",
-        "group": "allPeople",
-        "main": "mainPerson",
-        "single": "mainPerson",
-        "main_person": "mainPerson",
-        "main-person": "mainPerson"
-      }
-    );
-
-    const customOutfit = cleanText(req.body.customOutfit, "", 300);
-    const extraPrompt = cleanText(req.body.extraPrompt, "", 600);
+    const extraPrompt = cleanText(req.body.extraPrompt, "", 700);
     const accessories = normalizeAccessories(req.body.accessories);
 
-    const aspectRatio = getAspectRatio(format, viewType, peopleMode);
-
     const prompt = buildPrompt({
-      style,
-      viewType,
       background,
       mood,
-      format,
       outfit,
-      customOutfit,
       accessories,
-      likeness,
-      peopleMode,
-      extraPrompt
+      extraPrompt,
     });
 
     const inputImage = await fileToDataURI(req.file.path, req.file.mimetype);
 
-    const output = await replicate.run(
-      process.env.REPLICATE_MODEL || "black-forest-labs/flux-kontext-dev",
-      {
-        input: {
-          input_image: inputImage,
-          prompt,
-          aspect_ratio: aspectRatio,
-          output_format: "jpg"
-        }
-      }
-    );
+    const model =
+      process.env.REPLICATE_MODEL || "black-forest-labs/flux-kontext-dev";
+
+    const output = await replicate.run(model, {
+      input: {
+        input_image: inputImage,
+        prompt,
+        aspect_ratio: FIXED_ASPECT_RATIO,
+        output_format: "jpg",
+      },
+    });
 
     const imageUrl = await normalizeOutput(output);
 
     if (!imageUrl) {
       return res.status(500).json({
         error: "Es konnte kein Bild aus der Replicate-Antwort gelesen werden.",
-        rawOutput: output
+        rawOutput: output,
       });
     }
 
@@ -643,35 +585,35 @@ app.post("/api/avatar", upload.single("image"), async (req, res) => {
       imageUrl,
       prompt,
       settings: {
-        style,
-        viewType,
+        style: FIXED_STYLE,
+        viewType: FIXED_VIEW_TYPE,
+        peopleMode: FIXED_PEOPLE_MODE,
+        likeness: FIXED_LIKENESS,
         background,
         mood,
-        format,
         outfit,
-        customOutfit,
         accessories,
-        likeness,
-        peopleMode,
         extraPrompt,
-        aspectRatio
-      }
+        aspectRatio: FIXED_ASPECT_RATIO,
+        model,
+      },
     });
-
   } catch (error) {
     console.error("Fehler bei Avatar-Erstellung:", error);
 
     return res.status(500).json({
       error: "Avatar konnte nicht erstellt werden.",
-      details: error.message || "Unbekannter Fehler"
+      details: error.message || "Unbekannter Fehler",
     });
-
   } finally {
     if (uploadedFilePath) {
       try {
         await fs.unlink(uploadedFilePath);
       } catch (err) {
-        console.warn("Temporäre Datei konnte nicht gelöscht werden:", err.message);
+        console.warn(
+          "Temporäre Datei konnte nicht gelöscht werden:",
+          err.message
+        );
       }
     }
   }
@@ -686,7 +628,7 @@ app.use((err, req, res, next) => {
 
   return res.status(500).json({
     error: "Serverfehler.",
-    details: err.message || "Unbekannter Fehler"
+    details: err.message || "Unbekannter Fehler",
   });
 });
 
